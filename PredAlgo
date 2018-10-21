@@ -1,0 +1,122 @@
+##install and load libraries##
+
+pkgs <- c("RODBC","stats","forecast","caret","mlbench","randomForest","neuralnet","boot","plyr","matrixStats")
+new.packages <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+sapply(pkgs, require, character.only = T) #load 
+
+#set working directory
+
+setwd("//biprod/UserFiles/DCarpenter/Data Science/R projects/")
+
+#create connection and data source
+
+conn <- odbcDriverConnect('<insert SQL ODBC connection reqest here>')
+
+mydata <- sqlQuery(conn, "
+                   SELECT [InnCode]
+                   ,[RATPropID]
+                   ,[HotelName]
+                   ,[ShortName]
+                   ,[SubBrand]
+                   ,[Brand]
+                   ,[BrandDivision]
+                   ,[City]
+                   ,[State]
+                   ,[Capacity]
+                   ,[HotelType]
+                   ,[LocationType]
+                   ,[Latitude]
+                   ,[Longitude]
+                   ,[stays]
+                   ,[RmNts]
+                   ,[Arrivals]
+                   ,[Departures]
+                   ,[Adults]
+                   ,[Children]
+                   ,[Holiday Name] Holiday_Name
+                   ,[day_name]
+                   ,[StayDate]
+                   ,year(Staydate) year
+                   ,month(StayDate) month
+                   ,day(StayDate) day
+                   FROM [Staging].[BI].[datascience_tableau_extract]
+                   
+                   ;")
+
+mydata <- na.omit(mydata)  # listwise deletion of missing
+
+mydata.a <- subset(mydata,select = c("Capacity","RmNts","stays","Arrivals","Departures","Adults","Children"))
+
+# Random sampling
+samplesize = 0.60 * nrow(mydata.a)
+set.seed(80)
+index = sample( seq_len ( nrow ( mydata.a ) ), size = samplesize )
+
+# Create training and test set
+datatrain = mydata.a[ index, ]
+datatest = mydata.a[ -index, ]
+
+max = apply(mydata.a , 2 , max)
+min = apply(mydata.a , 2 , min)
+scaled = as.data.frame(scale(mydata.a , center = min, scale = max - min))
+
+
+# creating training and test set
+trainNN = scaled[index , ]
+testNN = scaled[-index , ]
+
+# fit neural network
+set.seed(2)
+NN = neuralnet(RmNts ~ Capacity + stays + Arrivals + Departures + Adults + Children, trainNN, hidden = 3 , linear.output = T )
+
+# plot neural network
+plot(NN)
+
+
+predict_testNN = compute(NN, testNN)
+predict_testNN = (predict_testNN$net.result * (max(mydata$RmNts) - min(mydata$RmNts))) + min(mydata$RmNts)
+
+plot(datatest$RmNts, predict_testNN, col='blue', pch=16, ylab = "predicted RmNts NN", xlab = "real RmNts")
+
+abline(0,1)
+
+# Calculate Root Mean Square Error (RMSE)
+RMSE.NN = (sum((datatest$RmNts - predict_testNN)^2) / nrow(datatest)) ^ 0.5
+
+# Initialize variables
+set.seed(50)
+k = 100
+RMSE.NN = NULL
+
+List = list( )
+
+# Fit neural network model within nested for loop
+for(j in 10:65){
+  for (i in 1:k) {
+    index = sample(1:nrow(mydata.a),j )
+    
+    trainNN = scaled[index,]
+    testNN = scaled[-index,]
+    datatest = mydata.a[-index,]
+    
+    NN = neuralnet(RmNts ~ Capacity + Stays + Arrivals + Departures + Adults + Children, trainNN, hidden = 3, linear.output= T)
+    predict_testNN = compute(NN,testNN[,c(1:5)])
+    predict_testNN = (predict_testNN$net.result*(max(datatest$RmNts)-min(datatest$RmNts)))+min(datatest$RmNts)
+    
+    RMSE.NN [i]<- (sum((datatest$RmNts - predict_testNN)^2)/nrow(datatest))^0.5
+  }
+  List[[j]] = RMSE.NN
+}
+
+Matrix.RMSE = do.call(cbind, List)
+
+boxplot(Matrix.RMSE[,56], ylab = "RMSE", main = "RMSE BoxPlot (length of traning set = 65)")
+
+med = colMedians(Matrix.RMSE)
+
+X = seq(10,65)
+
+plot (med~X, type = "l", xlab = "length of training set", ylab = "median RMSE", main = "Variation of RMSE with length of training set")
+
