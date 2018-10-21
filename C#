@@ -1,0 +1,238 @@
+using System;
+using System.Data;
+using Microsoft.SqlServer.Dts.Runtime;
+using System.Windows.Forms;
+using System.Net.Mail;
+using System.Data.SqlClient;
+using System.Net;
+
+
+namespace ST_fca0991dd15947038685aacebe6a316b
+{
+    /// <summary>
+    /// ScriptMain is the entry point class of the script.  Do not change the name, attributes,
+    /// or parent of this class.
+    /// </summary>
+	[Microsoft.SqlServer.Dts.Tasks.ScriptTask.SSISScriptTaskEntryPointAttribute]
+	public partial class ScriptMain : Microsoft.SqlServer.Dts.Tasks.ScriptTask.VSTARTScriptObjectModelBase
+	{
+        #region Help:  Using Integration Services variables and parameters in a script
+        /* To use a variable in this script, first ensure that the variable has been added to 
+         * either the list contained in the ReadOnlyVariables property or the list contained in 
+         * the ReadWriteVariables property of this script task, according to whether or not your
+         * code needs to write to the variable.  To add the variable, save this script, close this instance of
+         * Visual Studio, and update the ReadOnlyVariables and 
+         * ReadWriteVariables properties in the Script Transformation Editor window.
+         * To use a parameter in this script, follow the same steps. Parameters are always read-only.
+         * 
+         * Example of reading from a variable:
+         *  DateTime startTime = (DateTime) Dts.Variables["System::StartTime"].Value;
+         * 
+         * Example of writing to a variable:
+         *  Dts.Variables["User::myStringVariable"].Value = "new value";
+         * 
+         * Example of reading from a package parameter:
+         *  int batchId = (int) Dts.Variables["$Package::batchId"].Value;
+         *  
+         * Example of reading from a project parameter:
+         *  int batchId = (int) Dts.Variables["$Project::batchId"].Value;
+         * 
+         * Example of reading from a sensitive project parameter:
+         *  int batchId = (int) Dts.Variables["$Project::batchId"].GetSensitiveValue();
+         * */
+
+        #endregion
+
+        #region Help:  Firing Integration Services events from a script
+        /* This script task can fire events for logging purposes.
+         * 
+         * Example of firing an error event:
+         *  Dts.Events.FireError(18, "Process Values", "Bad value", "", 0);
+         * 
+         * Example of firing an information event:
+         *  Dts.Events.FireInformation(3, "Process Values", "Processing has started", "", 0, ref fireAgain)
+         * 
+         * Example of firing a warning event:
+         *  Dts.Events.FireWarning(14, "Process Values", "No values received for input", "", 0);
+         * */
+        #endregion
+
+        #region Help:  Using Integration Services connection managers in a script
+        /* Some types of connection managers can be used in this script task.  See the topic 
+         * "Working with Connection Managers Programatically" for details.
+         * 
+         * Example of using an ADO.Net connection manager:
+         *  object rawConnection = Dts.Connections["Sales DB"].AcquireConnection(Dts.Transaction);
+         *  SqlConnection myADONETConnection = (SqlConnection)rawConnection;
+         *  //Use the connection in some code here, then release the connection
+         *  Dts.Connections["Sales DB"].ReleaseConnection(rawConnection);
+         *
+         * Example of using a File connection manager
+         *  object rawConnection = Dts.Connections["Prices.zip"].AcquireConnection(Dts.Transaction);
+         *  string filePath = (string)rawConnection;
+         *  //Use the connection in some code here, then release the connection
+         *  Dts.Connections["Prices.zip"].ReleaseConnection(rawConnection);
+         * */
+        #endregion
+
+     	string _emailRecipients;
+        string _emailFrom;
+        string _body;
+        string _currentStep;
+        string _summary;
+        MailMessage _message;
+		/// <summary>
+        /// This method is called when this script task executes in the control flow.
+        /// Before returning from this method, set the value of Dts.TaskResult to indicate success or failure.
+        /// To open Help, press F1.
+        /// </summary>
+		
+		
+		public void Main()
+		{
+            Dts.TaskResult = SendEmail() ? (int)ScriptResults.Success : (int)ScriptResults.Failure;
+		}
+
+        public bool SendEmail()
+        {
+            _emailFrom = Dts.Variables["PackageOwnerEmail"].Value.ToString();
+            _body = string.Empty;
+            _currentStep = "Sending Summary Report Email";
+
+            try
+            {
+                _body = "<div style='font-family: Calibri;'>";
+                _body += "<p><b>     </b></p>";
+                _body += "<p><b>     </b></p>";
+                _body += "<table style='border: 1px solid; border-collapse: collapse; font-size: 8pt;'>";
+                _body += "<tr>";
+                _body += "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>CANCEL_DATE</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>TY_NUM_OF_CANCELLED</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>LY_NUM_OF_CANCELLED</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>CANCELLED_PctChg</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>TY_NUM_OF_ROOMNIGHTS</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>LY_NUM_OF_ROOMNIGHTS</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>NUM_OF_ROOMNIGHTS_PctChg</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>TY_ROOM_REVENUE_USD</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>LY_ROOM_REVENUE_USD</th>" +
+                         "<th style='border: 1px solid; padding: 5px 5px 5px 5px;'>ROOM_REVENUE_USD_PctChg</th>";
+                _body += "</tr>";
+
+                using (var _sqlconnection = new SqlConnection("<SQL ODBC Connection request here>;"))
+                {
+                    using (var _sqlCommand = new SqlCommand("Exec [RevMgmt].[CancellationRptDaily_Data_spEmail]", _sqlconnection) { CommandType = CommandType.Text })
+                    {
+                        _sqlconnection.Open();
+
+                        var _dataReader = _sqlCommand.ExecuteReader();
+
+                        while (_dataReader.Read())
+                        {
+                            
+							var _CANCEL_DATE = (string)_dataReader.GetValue(_dataReader.GetOrdinal("CANCEL_DATE"));
+                            var _TY_NUM_OF_CANCELLED = Convert.ToInt32(_dataReader.GetValue(_dataReader.GetOrdinal("TY_NUM_OF_CANCELLED"))).ToString();
+                            var _LY_NUM_OF_CANCELLED = Convert.ToInt32(_dataReader.GetValue(_dataReader.GetOrdinal("LY_NUM_OF_CANCELLED"))).ToString();
+                            var _CANCELLED_PctChg = string.Format("{0}%", (Convert.ToDecimal(_dataReader.GetValue(_dataReader.GetOrdinal("CANCELLED_PCT_CHG"))) * 100).ToString("N2"));
+                            var _TY_NUM_OF_ROOMNIGHTS = Convert.ToInt32(_dataReader.GetValue(_dataReader.GetOrdinal("TY_NUM_OF_ROOMNIGHTS"))).ToString();
+                            var _LY_NUM_OF_ROOMNIGHTS = Convert.ToInt32(_dataReader.GetValue(_dataReader.GetOrdinal("LY_NUM_OF_ROOMNIGHTS"))).ToString();
+                            var _NUM_OF_ROOMNIGHTS_PctChg = string.Format("{0}%", (Convert.ToDecimal(_dataReader.GetValue(_dataReader.GetOrdinal("NUM_OF_ROOMNIGHTS_PCT_CHG"))) * 100).ToString("N2"));
+                            var _TY_ROOM_REVENUE_USD = Convert.ToInt32(_dataReader.GetValue(_dataReader.GetOrdinal("TY_ROOM_REVENUE"))).ToString();
+                            var _LY_ROOM_REVENUE_USD = Convert.ToInt32(_dataReader.GetValue(_dataReader.GetOrdinal("LY_ROOM_REVENUE"))).ToString();
+                            var _ROOM_REVENUE_USD_PctChg = string.Format("{0}%", (Convert.ToDecimal(_dataReader.GetValue(_dataReader.GetOrdinal("ROOM_REVEUNE_USD_PCT_CHG"))) * 100).ToString("N2"));
+
+
+                            _body += "<tr>";
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: Left;'>{0}</td>", _CANCEL_DATE);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _TY_NUM_OF_CANCELLED);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _LY_NUM_OF_CANCELLED);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _CANCELLED_PctChg);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _TY_NUM_OF_ROOMNIGHTS);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _LY_NUM_OF_ROOMNIGHTS);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _NUM_OF_ROOMNIGHTS_PctChg);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _TY_ROOM_REVENUE_USD);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _LY_ROOM_REVENUE_USD);
+                            _body += string.Format("<td style='border: 1px solid; padding: 5px 5px 5px 5px; text-align: right;'>{0}</td>", _ROOM_REVENUE_USD_PctChg);
+
+
+                            _body += "</tr>";
+                        }
+                    }
+                }
+
+                _body += "</table>";
+                _body += "<br /><p><img src='example.jpg' alt='' /></p>";
+                _body += "</div>";
+
+                //_summary = string.Format("{0}RfpAlertSummary.xlsx", Dts.Variables["TEMPLATE"].Value.ToString());
+
+                // TEST EMAILS
+                _message = new MailMessage("<insert email here>");
+                _message.CC.Add("<insert email here>");
+
+                
+                using (var _smtpClient = new SmtpClient("smtpmail.example.com"))
+                {
+                    _smtpClient.Credentials = CredentialCache.DefaultNetworkCredentials;
+
+                    //var _summaryAttachment = new Attachment(_summary);
+
+                    //_message.Attachments.Add(_summaryAttachment);
+
+                    _message.IsBodyHtml = true;
+                    _message.Body = _body;
+                    _message.Subject = "";
+                    _message.Priority = MailPriority.High;
+                    _message.Headers.Add("X-Message-Flag", "Follow up");
+
+                    _currentStep = "Sending email for {0}.";
+                    _smtpClient.Send(_message);
+
+                    // _summaryAttachment = null;
+                }
+
+                return true;
+            }
+            catch (Exception Ex)
+            {
+                SendErrorEmail(_currentStep, Ex.Message);
+                return false;
+            }
+        }
+
+        public void SendErrorEmail(string _currentStep, string _errorMessage)
+        {
+            var _errorEmailFrom = Dts.Variables["PackageOwnerEmail"].Value.ToString();
+            var _errorEmailTo = "<insert email here>"; // Dts.Variables["PackageOwnerEmail"].Value.ToString();
+            var _pkgName = Dts.Variables["System::PackageName"].Value.ToString();
+            var _errorMailMessage = new MailMessage(_errorEmailFrom, _errorEmailTo);
+
+            using (var _smtpClient = new SmtpClient("smtp.example.com"))
+            {
+                _smtpClient.Credentials = CredentialCache.DefaultNetworkCredentials;
+
+                var _body = string.Format("The following error occurred on {0}:\n \tPackage: {1}\n \tStep: {2}\n \tError Description: {3}\n", DateTime.Today.ToLongDateString(), _pkgName, _currentStep, _errorMessage);
+
+                _errorMailMessage.Body = _body;
+                _errorMailMessage.Subject = string.Format("Failure: ({0})", _pkgName);
+
+                _smtpClient.Send(_errorMailMessage);
+            }
+        }
+
+        
+
+        #region ScriptResults declaration
+        /// <summary>
+        /// This enum provides a convenient shorthand within the scope of this class for setting the
+        /// result of the script.
+        /// 
+        /// This code was generated automatically.
+        /// </summary>
+        enum ScriptResults
+        {
+            Success = Microsoft.SqlServer.Dts.Runtime.DTSExecResult.Success,
+            Failure = Microsoft.SqlServer.Dts.Runtime.DTSExecResult.Failure
+        };
+        #endregion
+
+    }
